@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-standalone
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # Basic configuration
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://localhost:5678/
+      
+      # Use SQLite for simplicity (data stored in volume)
+      - DB_TYPE=sqlite
+      
+      # Optional: Set timezone
+      - GENERIC_TIMEZONE=America/New_York
+      - TZ=America/New_York
+    volumes:
+      # Persist data between restarts
+      - n8n_data:/home/node/.n8n
+      # Optional: Mount local workflows directory
+      # - ./workflows:/home/node/.n8n/workflows
+
+volumes:
+  n8n_data:
+    driver: local

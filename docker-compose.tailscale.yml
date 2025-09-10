@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-tailscale
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_SECURE_COOKIE=false
+      # Update these with your Tailscale hostname
+      - WEBHOOK_URL=http://mac-studio.halfmoon-blenny.ts.net:5678/
+      - N8N_EDITOR_BASE_URL=http://mac-studio.halfmoon-blenny.ts.net:5678/
+      - N8N_PERSONALIZATION_ENABLED=false
+      - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - EXECUTIONS_PROCESS=main
+      - N8N_LOG_LEVEL=info
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+      - ./local-files:/files
+    network_mode: host  # This allows the container to use Tailscale network directly
+
+  # Alternative: Run n8n with Tailscale sidecar container
+  # n8n-with-tailscale:
+  #   image: n8nio/n8n:latest
+  #   container_name: n8n
+  #   restart: unless-stopped
+  #   environment:
+  #     - N8N_HOST=0.0.0.0
+  #     - N8N_PORT=5678
+  #     - N8N_PROTOCOL=http
+  #     - WEBHOOK_URL=http://n8n.halfmoon-blenny.ts.net/
+  #     - N8N_EDITOR_BASE_URL=http://n8n.halfmoon-blenny.ts.net/
+  #   volumes:
+  #     - ./n8n_data:/home/node/.n8n
+  #   depends_on:
+  #     - tailscale
+  #   
+  # tailscale:
+  #   image: tailscale/tailscale:latest
+  #   container_name: n8n-tailscale
+  #   hostname: n8n
+  #   environment:
+  #     - TS_AUTHKEY=${TS_AUTHKEY}  # Set this in .env file
+  #     - TS_STATE_DIR=/var/lib/tailscale
+  #     - TS_USERSPACE=false
+  #   volumes:
+  #     - ./tailscale_state:/var/lib/tailscale
+  #     - /dev/net/tun:/dev/net/tun
+  #   cap_add:
+  #     - NET_ADMIN
+  #     - SYS_MODULE
+  #   command: tailscaled

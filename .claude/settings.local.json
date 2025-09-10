@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:docs.paperless-ngx.com)",
+      "WebSearch",
+      "Read(//Users/kielay/Delta-Analytical-Corp/delta-data-platform/apps/delta-dms/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

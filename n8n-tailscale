@@ -1,0 +1,365 @@
+#!/bin/bash
+
+# Unified n8n Tailscale Manager
+# A single script to manage n8n with Tailscale (HTTP/HTTPS)
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Script directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
+
+# Default values
+MODE=""
+ACTION=""
+BACKGROUND=false
+
+# Get Tailscale info
+get_tailscale_info() {
+    if ! command -v tailscale &> /dev/null; then
+        echo -e "${RED}Error: Tailscale is not installed${NC}"
+        exit 1
+    fi
+    
+    if ! tailscale status &>/dev/null; then
+        echo -e "${RED}Error: Tailscale is not running${NC}"
+        exit 1
+    fi
+    
+    TAILSCALE_IP=$(tailscale ip -4 2>/dev/null)
+    TAILSCALE_HOSTNAME=$(tailscale status --json 2>/dev/null | jq -r '.Self.DNSName' | sed 's/\.$//')
+}
+
+# Check if n8n is running
+check_n8n_status() {
+    if pgrep -f "node.*n8n" > /dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Stop n8n
+stop_n8n() {
+    if check_n8n_status; then
+        echo -e "${YELLOW}Stopping n8n...${NC}"
+        pkill -f "node.*n8n"
+        sleep 2
+        echo -e "${GREEN}n8n stopped${NC}"
+    else
+        echo -e "${YELLOW}n8n is not running${NC}"
+    fi
+}
+
+# Start n8n with HTTP
+start_http() {
+    get_tailscale_info
+    
+    if check_n8n_status; then
+        echo -e "${YELLOW}n8n is already running${NC}"
+        echo -n "Restart? (y/n): "
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            exit 0
+        fi
+        stop_n8n
+    fi
+    
+    echo -e "${BLUE}Starting n8n with HTTP...${NC}"
+    
+    if [ -f .env.tailscale ]; then
+        export $(grep -v '^#' .env.tailscale | xargs)
+    fi
+    
+    # Override with current Tailscale info
+    export WEBHOOK_URL="http://${TAILSCALE_HOSTNAME}:5678/"
+    export N8N_EDITOR_BASE_URL="http://${TAILSCALE_HOSTNAME}:5678/"
+    
+    if [ "$BACKGROUND" = true ]; then
+        pnpm start > n8n.log 2>&1 &
+        PID=$!
+        sleep 3
+        
+        if ps -p $PID > /dev/null; then
+            echo -e "${GREEN}✓ n8n started (PID: $PID)${NC}"
+        else
+            echo -e "${RED}Failed to start n8n${NC}"
+            tail -20 n8n.log
+            exit 1
+        fi
+    else
+        pnpm start
+    fi
+}
+
+# Start n8n with HTTPS
+start_https() {
+    get_tailscale_info
+    
+    # Check for certificates
+    CERT_FILE="$SCRIPT_DIR/${TAILSCALE_HOSTNAME}.crt"
+    KEY_FILE="$SCRIPT_DIR/${TAILSCALE_HOSTNAME}.key"
+    
+    if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
+        echo -e "${YELLOW}Certificates not found. Generating...${NC}"
+        echo -e "${CYAN}This requires HTTPS to be enabled in Tailscale admin console${NC}"
+        echo -e "${CYAN}Visit: https://login.tailscale.com/admin/dns${NC}"
+        echo -n "Press Enter when ready: "
+        read -r
+        
+        tailscale cert "$TAILSCALE_HOSTNAME"
+        
+        if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
+            echo -e "${RED}Failed to generate certificates${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}Certificates generated${NC}"
+    fi
+    
+    if check_n8n_status; then
+        echo -e "${YELLOW}n8n is already running${NC}"
+        echo -n "Restart? (y/n): "
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            exit 0
+        fi
+        stop_n8n
+    fi
+    
+    echo -e "${BLUE}Starting n8n with HTTPS...${NC}"
+    
+    if [ -f .env.https ]; then
+        export $(grep -v '^#' .env.https | xargs)
+    fi
+    
+    # Override with current paths and URLs
+    export N8N_SSL_CERT="$CERT_FILE"
+    export N8N_SSL_KEY="$KEY_FILE"
+    export WEBHOOK_URL="https://${TAILSCALE_HOSTNAME}:5678/"
+    export N8N_EDITOR_BASE_URL="https://${TAILSCALE_HOSTNAME}:5678/"
+    
+    if [ "$BACKGROUND" = true ]; then
+        pnpm start > n8n-https.log 2>&1 &
+        PID=$!
+        sleep 3
+        
+        if ps -p $PID > /dev/null; then
+            echo -e "${GREEN}✓ n8n started with HTTPS (PID: $PID)${NC}"
+        else
+            echo -e "${RED}Failed to start n8n${NC}"
+            tail -20 n8n-https.log
+            exit 1
+        fi
+    else
+        pnpm start
+    fi
+}
+
+# Show status
+show_status() {
+    get_tailscale_info
+    
+    echo -e "${CYAN}═══ n8n Tailscale Status ═══${NC}"
+    echo ""
+    
+    if check_n8n_status; then
+        echo -e "${GREEN}● n8n is running${NC}"
+        PID=$(pgrep -f "node.*n8n" | head -1)
+        echo -e "  PID: $PID"
+        
+        # Check which mode it's running in
+        if lsof -p $PID 2>/dev/null | grep -q "443\|https"; then
+            MODE="HTTPS"
+        else
+            MODE="HTTP"
+        fi
+        echo -e "  Mode: $MODE"
+    else
+        echo -e "${RED}● n8n is not running${NC}"
+    fi
+    
+    echo ""
+    echo -e "${CYAN}Tailscale Info:${NC}"
+    echo -e "  Hostname: ${TAILSCALE_HOSTNAME}"
+    echo -e "  IP: ${TAILSCALE_IP}"
+    
+    echo ""
+    echo -e "${CYAN}Access URLs:${NC}"
+    if [ "$MODE" = "HTTPS" ] || [ -f "${TAILSCALE_HOSTNAME}.crt" ]; then
+        echo -e "  ${GREEN}➜${NC} https://${TAILSCALE_HOSTNAME}:5678"
+    fi
+    echo -e "  ${GREEN}➜${NC} http://${TAILSCALE_HOSTNAME}:5678"
+    echo -e "  ${GREEN}➜${NC} http://localhost:5678"
+    
+    # Check for certificates
+    echo ""
+    echo -e "${CYAN}Certificates:${NC}"
+    if [ -f "${TAILSCALE_HOSTNAME}.crt" ]; then
+        CERT_EXPIRY=$(openssl x509 -in "${TAILSCALE_HOSTNAME}.crt" -noout -enddate 2>/dev/null | cut -d= -f2)
+        echo -e "  ${GREEN}✓${NC} Valid until: $CERT_EXPIRY"
+    else
+        echo -e "  ${YELLOW}○${NC} No certificates found"
+    fi
+}
+
+# Show logs
+show_logs() {
+    LOG_FILE="n8n.log"
+    
+    if [ -f "n8n-https.log" ] && [ "n8n-https.log" -nt "n8n.log" ]; then
+        LOG_FILE="n8n-https.log"
+    fi
+    
+    if [ ! -f "$LOG_FILE" ]; then
+        echo -e "${RED}No log file found${NC}"
+        exit 1
+    fi
+    
+    echo -e "${CYAN}Following $LOG_FILE...${NC}"
+    tail -f "$LOG_FILE"
+}
+
+# Renew certificates
+renew_certs() {
+    get_tailscale_info
+    
+    echo -e "${BLUE}Renewing certificates for ${TAILSCALE_HOSTNAME}...${NC}"
+    tailscale cert "$TAILSCALE_HOSTNAME"
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Certificates renewed successfully${NC}"
+        
+        if check_n8n_status; then
+            echo -e "${YELLOW}Restart n8n to use new certificates${NC}"
+        fi
+    else
+        echo -e "${RED}Failed to renew certificates${NC}"
+        exit 1
+    fi
+}
+
+# Show help
+show_help() {
+    cat << EOF
+${CYAN}n8n Tailscale Manager${NC}
+
+${GREEN}Usage:${NC}
+  $(basename "$0") [command] [options]
+
+${GREEN}Commands:${NC}
+  start       Start n8n with HTTP (default)
+  start-https Start n8n with HTTPS
+  stop        Stop n8n
+  restart     Restart n8n
+  status      Show current status
+  logs        Follow n8n logs
+  renew       Renew HTTPS certificates
+  help        Show this help message
+
+${GREEN}Options:${NC}
+  -b, --background  Run in background (for start commands)
+
+${GREEN}Examples:${NC}
+  $(basename "$0") start              # Start with HTTP
+  $(basename "$0") start-https -b     # Start with HTTPS in background
+  $(basename "$0") status             # Check status
+  $(basename "$0") logs               # View logs
+  $(basename "$0") renew              # Renew certificates
+
+${CYAN}Access URLs:${NC}
+  HTTP:  http://${TAILSCALE_HOSTNAME:-your-hostname.ts.net}:5678
+  HTTPS: https://${TAILSCALE_HOSTNAME:-your-hostname.ts.net}:5678
+
+EOF
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        start)
+            ACTION="start_http"
+            shift
+            ;;
+        start-https|https)
+            ACTION="start_https"
+            shift
+            ;;
+        stop)
+            ACTION="stop_n8n"
+            shift
+            ;;
+        restart)
+            ACTION="restart"
+            shift
+            ;;
+        status)
+            ACTION="show_status"
+            shift
+            ;;
+        logs|log)
+            ACTION="show_logs"
+            shift
+            ;;
+        renew)
+            ACTION="renew_certs"
+            shift
+            ;;
+        help|-h|--help)
+            show_help
+            exit 0
+            ;;
+        -b|--background)
+            BACKGROUND=true
+            shift
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
+# Default action
+if [ -z "$ACTION" ]; then
+    show_help
+    exit 0
+fi
+
+# Execute action
+case $ACTION in
+    restart)
+        stop_n8n
+        start_http
+        ;;
+    *)
+        $ACTION
+        ;;
+esac
+
+# Show final URLs if started
+if [[ "$ACTION" == "start_http" ]] || [[ "$ACTION" == "start_https" ]]; then
+    get_tailscale_info
+    echo ""
+    echo -e "${GREEN}═══ n8n is ready! ═══${NC}"
+    
+    if [[ "$ACTION" == "start_https" ]]; then
+        echo -e "${GREEN}➜${NC} https://${TAILSCALE_HOSTNAME}:5678"
+    else
+        echo -e "${GREEN}➜${NC} http://${TAILSCALE_HOSTNAME}:5678"
+    fi
+    
+    echo ""
+    echo -e "${CYAN}Commands:${NC}"
+    echo -e "  Stop:   $(basename "$0") stop"
+    echo -e "  Logs:   $(basename "$0") logs"
+    echo -e "  Status: $(basename "$0") status"
+fi

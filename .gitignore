@@ -42,3 +42,13 @@ packages/testing/**/.cursor/rules/
 __pycache__
 packages/cli/THIRD_PARTY_LICENSES.md
 .coverage
+
+*.key
+
+*.crt
+
+.env.https
+
+.env.tailscale
+
+client_secret_380337447960-1ree504g96maco4u8t9lk61okv8rfirj.apps.googleusercontent.com.json
