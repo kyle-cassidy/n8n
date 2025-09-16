@@ -1,0 +1,3 @@
+[submodule "packages/custom/nodes/n8n-nodes-paperless-ngx"]
+	path = packages/custom/nodes/n8n-nodes-paperless-ngx
+	url = https://github.com/chezmoidotsh/n8n-nodes-paperless.git
