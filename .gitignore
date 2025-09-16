@@ -52,3 +52,9 @@ packages/cli/THIRD_PARTY_LICENSES.md
 .env.tailscale
 
 client_secret_380337447960-1ree504g96maco4u8t9lk61okv8rfirj.apps.googleusercontent.com.json
+
+# Local n8n development files
+n8n_data/
+.n8n/
+*.sqlite
+*.sqlite3
